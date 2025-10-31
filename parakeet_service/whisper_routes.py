@@ -4,6 +4,7 @@ from pathlib import Path
 from collections import defaultdict
 from typing import Optional
 from io import StringIO
+import soundfile as sf
 
 from fastapi import (
     APIRouter, BackgroundTasks, HTTPException, Request, status,
@@ -44,9 +45,8 @@ async def transcribe_asr_compatible(
     audio_file: UploadFile = File(..., description="Audio or video file to transcribe."),
     task: Optional[str] = Form("transcribe"),
     language: Optional[str] = Form("en"),
-    # The 'output' parameter is now crucial for determining the response format.
     output: str = Form("json", enum=["txt", "vtt", "srt", "json"]),
-) -> Response: # Return type is now a generic Response
+) -> Response:
     """
     Trancribes an audio stream and returns the result in the format specified
     by the 'output' parameter (json, srt, vtt, or txt).
@@ -87,6 +87,8 @@ async def transcribe_asr_compatible(
     cleanup_files = [tmp_path] + [p for p in chunk_paths if p != tmp_path]
     schedule_cleanup(background_tasks, *cleanup_files)
 
+    chunk_durations = [sf.info(p).duration for p in chunk_paths]
+
     model = request.app.state.asr_model
     try:
         outs = model.transcribe([str(p) for p in chunk_paths], batch_size=BATCH_SIZE, timestamps=True)
@@ -96,21 +98,56 @@ async def transcribe_asr_compatible(
     if isinstance(outs, tuple):
         outs = outs[0]
 
-    texts, merged_timestamps = [], defaultdict(list)
-    for h in outs:
-        texts.append(getattr(h, "text", str(h)))
-        for k, v in _to_builtin(getattr(h, "timestamp", {})).items():
-            merged_timestamps[k].extend(v)
+    segments_data = []
+    full_text_parts = []
+    time_offset = 0.0
 
-    
-    # Create the final result dictionary in the expected structure.
+    for i, segment_result in enumerate(outs):
+        text = getattr(segment_result, "text", "").strip()
+        if not text:
+            if i < len(chunk_durations):
+                time_offset += chunk_durations[i]
+            continue
+
+        full_text_parts.append(text)
+        ts_data = _to_builtin(getattr(segment_result, "timestamp", {}))
+        segment_ts_list = ts_data.get("segment", [])
+        
+        
+        # The traceback proves segment timestamps are dicts, not lists.
+        # This logic handles that structure correctly.
+        if segment_ts_list:
+            try:
+                # We expect a list of dictionaries. Take the start of the first
+                # and the end of the last to span the whole transcribed chunk.
+                first_segment = segment_ts_list[0]
+                last_segment = segment_ts_list[-1]
+
+                start_time_rel = first_segment.get('start')
+                end_time_rel = last_segment.get('end')
+
+                if start_time_rel is not None and end_time_rel is not None:
+                    segments_data.append({
+                        "start": start_time_rel + time_offset,
+                        "end": end_time_rel + time_offset,
+                        "text": text
+                    })
+                else:
+                    logger.warning(f"Segment timestamp for chunk {i} was missing 'start' or 'end' keys.")
+
+            except (IndexError, AttributeError, TypeError) as e:
+                logger.warning(f"Could not parse segment timestamp for chunk {i} due to error: {e}. Data was: {segment_ts_list}")
+        
+
+        if i < len(chunk_durations):
+            time_offset += chunk_durations[i]
+
     final_result = {
-        "text": " ".join(texts).strip(),
-        "segments": merged_timestamps.get("segment", []),
+        "text": " ".join(full_text_parts).strip(),
+        "segments": segments_data,
         "language": "en"
     }
 
-    # Use the appropriate formatter based on the 'output' parameter.
     with StringIO() as string_io:
         if output == "srt":
             write_srt(final_result, string_io)
@@ -122,7 +159,5 @@ async def transcribe_asr_compatible(
             write_txt(final_result, string_io)
             return PlainTextResponse(string_io.getvalue(), media_type="text/plain")
         else: # Default to JSON
-            # We still use our Pydantic model here for validation before returning a JSONResponse
             validated_result = WhisperTranscriptionResponse(**final_result)
             return JSONResponse(validated_result.model_dump())
-    
