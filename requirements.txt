@@ -9,4 +9,3 @@ pytest
 python-multipart
 ffmpeg-python
 python-dotenv
-python-magic
