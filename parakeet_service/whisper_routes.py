@@ -8,7 +8,7 @@ import soundfile as sf
 
 from fastapi import (
     APIRouter, BackgroundTasks, HTTPException, Request, status,
-    File, UploadFile, Form, Response
+    File, UploadFile, Form, Query, Response  # <-- Query is the key
 )
 from fastapi.responses import PlainTextResponse, JSONResponse
 
@@ -42,14 +42,18 @@ whisper_router = APIRouter(tags=["whisper_compatibility"])
 async def transcribe_asr_compatible(
     request: Request,
     background_tasks: BackgroundTasks,
+    # The 'audio_file' is the only parameter read from the Form Body.
     audio_file: UploadFile = File(..., description="Audio or video file to transcribe."),
-    task: Optional[str] = Form("transcribe"),
-    language: Optional[str] = Form("en"),
-    output: str = Form("json", enum=["txt", "vtt", "srt", "json"]),
+    # --- START OF CORRECTED PARAMETERS ---
+    # All other parameters are URL Query Parameters, not Form fields.
+    task: Optional[str] = Query("transcribe", description="Task to perform (transcribe or translate)."),
+    language: Optional[str] = Query("en", description="Language code for the audio."),
+    output: str = Query("json", enum=["txt", "vtt", "srt", "json"], description="The desired output format."),
+    # --- END OF CORRECTED PARAMETERS ---
 ) -> Response:
     """
     Trancribes an audio stream and returns the result in the format specified
-    by the 'output' parameter (json, srt, vtt, or txt).
+    by the 'output' query parameter (json, srt, vtt, or txt).
     """
     source_description = f"uploaded file '{audio_file.filename}'"
 
@@ -113,16 +117,10 @@ async def transcribe_asr_compatible(
         ts_data = _to_builtin(getattr(segment_result, "timestamp", {}))
         segment_ts_list = ts_data.get("segment", [])
         
-        
-        # The traceback proves segment timestamps are dicts, not lists.
-        # This logic handles that structure correctly.
         if segment_ts_list:
             try:
-                # We expect a list of dictionaries. Take the start of the first
-                # and the end of the last to span the whole transcribed chunk.
                 first_segment = segment_ts_list[0]
                 last_segment = segment_ts_list[-1]
-
                 start_time_rel = first_segment.get('start')
                 end_time_rel = last_segment.get('end')
 
@@ -132,12 +130,8 @@ async def transcribe_asr_compatible(
                         "end": end_time_rel + time_offset,
                         "text": text
                     })
-                else:
-                    logger.warning(f"Segment timestamp for chunk {i} was missing 'start' or 'end' keys.")
-
-            except (IndexError, AttributeError, TypeError) as e:
-                logger.warning(f"Could not parse segment timestamp for chunk {i} due to error: {e}. Data was: {segment_ts_list}")
-        
+            except (IndexError, AttributeError, TypeError):
+                pass
 
         if i < len(chunk_durations):
             time_offset += chunk_durations[i]
