@@ -22,13 +22,12 @@ whisper_router = APIRouter(tags=["whisper_compatibility"])
 @whisper_router.post(
     "/asr",
     response_model=WhisperTranscriptionResponse,
-    summary="Transcribe an audio or video file (Primary Endpoint)",
+    summary="Transcribe an audio or video file (For use with Bazarr)",
 )
 @whisper_router.post(
     "/audio/transcriptions",
     response_model=WhisperTranscriptionResponse,
-    summary="[Legacy Alias] Transcribe audio",
-    deprecated=True,
+    summary="[OpenAI Compatible] Transcribe audio",
 )
 @whisper_router.post(
     "/audio/transcriptions/detect-language",
