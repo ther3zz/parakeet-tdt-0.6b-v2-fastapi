@@ -22,19 +22,19 @@ whisper_router = APIRouter(tags=["whisper_compatibility"])
 @whisper_router.post(
     "/asr",
     response_model=WhisperTranscriptionResponse,
-    summary="Transcribe an audio or video file (Bazarr/Whisper ASR compatible)",
+    summary="Transcribe an audio or video file (Primary Endpoint)",
 )
 @whisper_router.post(
     "/audio/transcriptions",
     response_model=WhisperTranscriptionResponse,
-    summary="Transcribe audio (Legacy Compatibility)",
-    include_in_schema=False,
+    summary="[Legacy Alias] Transcribe audio",
+    deprecated=True,
 )
 @whisper_router.post(
     "/audio/transcriptions/detect-language",
     response_model=WhisperTranscriptionResponse,
-    summary="Transcribe audio (Legacy Compatibility)",
-    include_in_schema=False,
+    summary="[Legacy Alias] Transcribe audio",
+    deprecated=True,
 )
 async def transcribe_asr_compatible(
     request: Request,
@@ -60,7 +60,6 @@ async def transcribe_asr_compatible(
         logger.error("File upload failed: received file was empty.")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded 'audio_file' is empty.")
 
-    # --- START OF WAV HEADER DETECTION LOGIC ---
     # A valid WAV file starts with "RIFF" and has "WAVE" at offset 8.
     is_valid_wav = (
         total_bytes_read > 12 and
@@ -101,7 +100,6 @@ async def transcribe_asr_compatible(
                 logger.error(f"FFmpeg failed while wrapping RAW audio for {source_description} with return code {process.returncode}")
                 logger.error(f"FFmpeg error output: {stderr_str}")
                 raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=f"FFmpeg processing failed: {stderr_str[:250]}")
-    # --- END OF WAV HEADER DETECTION LOGIC ---
 
     # At this point, tmp_path always points to a valid WAV file.
     # Chunk the audio file using VAD
