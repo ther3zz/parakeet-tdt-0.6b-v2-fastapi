@@ -25,16 +25,15 @@ RUN pip install --no-cache-dir --upgrade pip \
 # Stage 2: Runtime stage
 FROM python:3.10.7-slim
 
-# --- START OF MODIFICATION ---
-# Install runtime dependencies, including libmagic1 for MIME type detection
+# Install runtime dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        ffmpeg libmagic1 \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
-# --- END OF MODIFICATION ---
 
 WORKDIR /app
 COPY ./parakeet_service ./parakeet_service
+COPY .env.example .env
 COPY --from=builder /opt/venv /opt/venv
 
 ENV PATH="/opt/venv/bin:${PATH}" \
